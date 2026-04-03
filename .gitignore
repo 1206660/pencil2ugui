@@ -8,3 +8,5 @@ tests
 Design2Ugui.Editor.csproj
 Pencil2Unity.sln
 docs
+Assembly-CSharp-Editor.csproj
+Assembly-CSharp.csproj
