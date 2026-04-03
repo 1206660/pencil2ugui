@@ -1,0 +1,21 @@
+{
+  "name": "com.pencil2ugui.core",
+  "version": "0.1.0",
+  "displayName": "Pencil to UGUI Core",
+  "description": "Core UGUI conversion scaffolding for pencil-to-Unity workflows",
+  "unity": "2021.3.14f",
+  "keywords": [
+    "pencil",
+    "ugui",
+    "ui",
+    "importer"
+  ],
+  "author": {
+    "name": "pencil2ugui",
+    "url": "https://github.com/1206660/pencil2ugui"
+  },
+  "dependencies": {
+    "com.unity.textmeshpro": "3.0.6",
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  }
+}
