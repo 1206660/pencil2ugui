@@ -2,16 +2,17 @@
     "name": "Design2Ugui.Editor",
     "rootNamespace": "Design2Ugui",
     "references": [
-        "Unity.TextMeshPro",
-        "Newtonsoft.Json"
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [
         "Editor"
     ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
-    "overrideReferences": false,
-    "precompiledReferences": [],
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],
