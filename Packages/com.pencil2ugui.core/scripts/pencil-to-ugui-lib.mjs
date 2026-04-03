@@ -9,17 +9,77 @@ function toArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function parseHexColor(value) {
+function defaultColor() {
+  return { r: 1, g: 1, b: 1, a: 1 };
+}
+
+function normalizeHexColor(value) {
   if (typeof value !== 'string') {
-    return { r: 1, g: 1, b: 1, a: 1 };
+    return null;
   }
 
-  const hex = value.replace('#', '');
-  const normalized = hex.length === 8 ? hex : `${hex}ff`;
+  const hex = value.trim().replace('#', '');
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    return `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}ff`;
+  }
+
+  if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+    return `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+  }
+
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return `${hex}ff`;
+  }
+
+  if (/^[0-9a-fA-F]{8}$/.test(hex)) {
+    return hex;
+  }
+
+  return null;
+}
+
+function resolveColorString(value, variables) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  if (value.startsWith('$')) {
+    const variableName = value.slice(1);
+    const variable = variables?.[variableName];
+    if (!variable || variable.type !== 'color') {
+      return null;
+    }
+
+    if (typeof variable.value === 'string') {
+      return variable.value;
+    }
+
+    if (Array.isArray(variable.value) && variable.value.length > 0) {
+      const defaultEntry = variable.value.find(entry => !entry.theme) ?? variable.value[0];
+      return defaultEntry?.value ?? null;
+    }
+
+    return null;
+  }
+
+  return value;
+}
+
+function parseHexColor(value, variables = null) {
+  const resolved = resolveColorString(value, variables);
+  const normalized = normalizeHexColor(resolved);
+  if (!normalized) {
+    return defaultColor();
+  }
+
   const r = Number.parseInt(normalized.slice(0, 2), 16) / 255;
   const g = Number.parseInt(normalized.slice(2, 4), 16) / 255;
   const b = Number.parseInt(normalized.slice(4, 6), 16) / 255;
   const a = Number.parseInt(normalized.slice(6, 8), 16) / 255;
+
+  if ([r, g, b, a].some(channel => Number.isNaN(channel))) {
+    return defaultColor();
+  }
 
   return { r, g, b, a };
 }
@@ -245,16 +305,16 @@ function determineComponentType(node) {
   return 'Panel';
 }
 
-function extractSolidColor(node) {
+function extractSolidColor(node, variables = null) {
   if (typeof node.fill === 'string') {
-    return parseHexColor(node.fill);
+    return parseHexColor(node.fill, variables);
   }
 
   if (node.fill && typeof node.fill === 'object' && !Array.isArray(node.fill) && node.fill.type === 'color' && typeof node.fill.color === 'string') {
-    return parseHexColor(node.fill.color);
+    return parseHexColor(node.fill.color, variables);
   }
 
-  return { r: 1, g: 1, b: 1, a: 1 };
+  return defaultColor();
 }
 
 function extractImageRef(node) {
@@ -338,9 +398,9 @@ function buildRectTransform(node, parentNode) {
   };
 }
 
-function buildComponentData(node, componentType) {
+function buildComponentData(node, componentType, variables = null) {
   return {
-    color: extractSolidColor(node),
+    color: extractSolidColor(node, variables),
     text: componentType === 'Text' ? extractText(node) : '',
     fontSize: typeof node.fontSize === 'number' ? node.fontSize : 14,
     fontFamily: typeof node.fontFamily === 'string' ? node.fontFamily : '',
@@ -428,7 +488,7 @@ function normalizeComponentNodeForSignature(node) {
   return normalized;
 }
 
-function convertResolvedNodeToUgui(node, index, parentNode = null) {
+function convertResolvedNodeToUgui(node, index, variables = null, parentNode = null) {
   const materialized = materializeNode(node, index);
   const componentType = determineComponentType(materialized);
   const uguiNode = {
@@ -436,7 +496,7 @@ function convertResolvedNodeToUgui(node, index, parentNode = null) {
     name: materialized.name ?? materialized.id ?? materialized.type,
     componentType,
     rectTransform: buildRectTransform(materialized, parentNode),
-    componentData: buildComponentData(materialized, componentType),
+    componentData: buildComponentData(materialized, componentType, variables),
     children: []
   };
 
@@ -446,7 +506,7 @@ function convertResolvedNodeToUgui(node, index, parentNode = null) {
   }
 
   for (const child of toArray(materialized.children)) {
-    uguiNode.children.push(convertResolvedNodeToUgui(child, index, materialized));
+    uguiNode.children.push(convertResolvedNodeToUgui(child, index, variables, materialized));
   }
 
   return uguiNode;
@@ -467,7 +527,7 @@ function convertNodeToBundleNode(node, context, parentNode = null) {
       prefabKey: componentKey,
       componentType: 'PrefabInstance',
       rectTransform: buildBundleRectTransform(materialized, parentNode),
-      componentData: buildComponentData(materialized, 'Panel'),
+      componentData: buildComponentData(materialized, 'Panel', context.variables),
       children: []
     };
   }
@@ -476,7 +536,7 @@ function convertNodeToBundleNode(node, context, parentNode = null) {
   const componentType = determineComponentType(materialized);
   const assetKey = registerAsset(materialized, context.penFilePath, context.assetMap, context.outputRoot);
   registerFont(materialized, context.fontMap);
-  const componentData = buildComponentData(materialized, componentType);
+  const componentData = buildComponentData(materialized, componentType, context.variables);
   if (assetKey) {
     componentData.imageRef = assetKey;
   }
@@ -526,7 +586,7 @@ function collectComponent(componentNode, context) {
 function convertPenNodeToUgui(document, nodeId) {
   const index = collectNodes(document.children);
   const targetNode = findTargetNode(document, nodeId);
-  return convertResolvedNodeToUgui(targetNode, index);
+  return convertResolvedNodeToUgui(targetNode, index, document.variables ?? {});
 }
 
 function convertPenFileToUgui(filePath, nodeId = null) {
@@ -540,6 +600,7 @@ function createImportBundle(filePath, nodeId = null, outputRoot = 'Assets/UI') {
   const targetNode = findTargetNode(document, nodeId);
   const context = {
     index,
+    variables: document.variables ?? {},
     penFilePath: filePath,
     outputRoot,
     componentMap: new Map(),
