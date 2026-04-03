@@ -185,7 +185,13 @@ function findTargetNode(document, nodeId) {
   if (nodeId) {
     const node = allNodes.get(nodeId);
     if (!node) {
-      throw new Error(`Node not found: ${nodeId}`);
+      const availableNodeIds = toArray(document.children)
+        .map(child => child.id)
+        .filter(Boolean);
+      const suffix = availableNodeIds.length > 0
+        ? `. Available top-level node ids: ${availableNodeIds.join(', ')}`
+        : '';
+      throw new Error(`Node not found: ${nodeId}${suffix}`);
     }
     return node;
   }

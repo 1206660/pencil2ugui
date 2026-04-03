@@ -4,12 +4,11 @@
 
 This repository is a stripped-down UGUI conversion scaffold. All previous source-specific importer logic has been removed.
 
-## Remaining Core Files
+## Unity Package Layout
 
-- `Editor/Models/UguiModels.cs`
-- `Editor/Core/UguiConverter.cs`
-- `Editor/Core/PrefabCreator.cs`
-- `Editor/Core/ProjectSettings.cs`
+- `Packages/com.pencil2ugui.core/package.json`
+- `Packages/com.pencil2ugui.core/Editor/`
+- `Packages/com.pencil2ugui.core/scripts/`
 
 ## Expected Direction
 
