@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Design2Ugui.Core;
 using UnityEditor;
 using UnityEngine;
@@ -7,52 +8,12 @@ namespace Pencil2Unity.Editor
 {
     public static class UnityToPencilBatchExport
     {
-        [MenuItem("Tools/Design2Ugui/Export Unity To Pencil (.pen)")]
-        public static void ExportPenFromMenu()
-        {
-            try
-            {
-                const string defaultRoot = "Assets/UI";
-                var inputRoot = SelectProjectFolder(defaultRoot, "Select Unity UI Root Folder");
-                if (string.IsNullOrWhiteSpace(inputRoot))
-                {
-                    return;
-                }
-
-                var outputPath = EditorUtility.SaveFilePanel(
-                    "Export Unity UI To Pencil",
-                    "Temp/DesignSync/output",
-                    "app-ui",
-                    "pen"
-                );
-
-                if (string.IsNullOrWhiteSpace(outputPath))
-                {
-                    return;
-                }
-
-                var result = RunPipeline(inputRoot, outputPath);
-
-                AssetDatabase.Refresh();
-                EditorUtility.DisplayDialog(
-                    "Design2Ugui",
-                    $"Input Root:\n{inputRoot}\n\nPencil file written to:\n{result.PenPath}\n\nScan:\n{result.ScanPath}\n\nBundles:\n{result.ComponentBundlePath}\n{result.ScreenBundlePath}\n{result.AuditBundlePath}",
-                    "OK"
-                );
-            }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception);
-                EditorUtility.DisplayDialog("Design2Ugui", exception.Message, "OK");
-            }
-        }
-
         [MenuItem("Tools/Design2Ugui/Export Unity Scan")]
         public static void ExportScanFromMenu()
         {
             try
             {
-                const string defaultRoot = "Assets/UI";
+                const string defaultRoot = "Assets/Art/UIPanel/gonghui";
                 var inputRoot = SelectProjectFolder(defaultRoot, "Select Unity UI Root Folder");
                 if (string.IsNullOrWhiteSpace(inputRoot))
                 {
@@ -61,7 +22,7 @@ namespace Pencil2Unity.Editor
 
                 var outputPath = EditorUtility.SaveFilePanel(
                     "Export Unity UI Scan",
-                    "Temp/DesignSync/unity-scan",
+                    Path.Combine(ProjectRoot, "Temp", "PencilBundles", "unity-scan"),
                     "unity-scan",
                     "json"
                 );
@@ -91,7 +52,7 @@ namespace Pencil2Unity.Editor
             {
                 var scanPath = EditorUtility.OpenFilePanel(
                     "Select Unity Scan JSON",
-                    "Temp/DesignSync/unity-scan",
+                    Path.Combine(ProjectRoot, "Temp", "PencilBundles", "unity-scan"),
                     "json"
                 );
 
@@ -102,7 +63,7 @@ namespace Pencil2Unity.Editor
 
                 var outputDirectory = EditorUtility.OpenFolderPanel(
                     "Select Design Sync Output Folder",
-                    "Temp/DesignSync",
+                    Path.Combine(ProjectRoot, "Temp", "PencilBundles"),
                     string.Empty
                 );
 
@@ -135,7 +96,7 @@ namespace Pencil2Unity.Editor
             {
                 var componentBundlePath = EditorUtility.OpenFilePanel(
                     "Select Components Bundle",
-                    "Temp/DesignSync/component-library",
+                    Path.Combine(ProjectRoot, "Temp", "PencilBundles", "component-library"),
                     "json"
                 );
 
@@ -146,7 +107,7 @@ namespace Pencil2Unity.Editor
 
                 var screenBundlePath = EditorUtility.OpenFilePanel(
                     "Select Screens Bundle",
-                    "Temp/DesignSync/screen-compositions",
+                    Path.Combine(ProjectRoot, "Temp", "PencilBundles", "screen-compositions"),
                     "json"
                 );
 
@@ -157,7 +118,7 @@ namespace Pencil2Unity.Editor
 
                 var auditBundlePath = EditorUtility.OpenFilePanel(
                     "Select Audit Bundle",
-                    "Temp/DesignSync/reports",
+                    Path.Combine(ProjectRoot, "Temp", "PencilBundles", "reports"),
                     "json"
                 );
 
@@ -168,8 +129,8 @@ namespace Pencil2Unity.Editor
 
                 var outputPath = EditorUtility.SaveFilePanel(
                     "Write Pencil File",
-                    "Temp/DesignSync/output",
-                    "app-ui",
+                    Path.Combine(ProjectRoot, "Temp", "PencilBundles"),
+                    "gonghui",
                     "pen"
                 );
 
@@ -195,7 +156,7 @@ namespace Pencil2Unity.Editor
             try
             {
                 var arguments = Environment.GetCommandLineArgs();
-                var inputRoot = GetArgument(arguments, "-inputRoot") ?? "Assets/UI";
+                var inputRoot = GetArgument(arguments, "-inputRoot") ?? "Assets/Art/UIPanel/gonghui";
                 var outputPath = GetArgument(arguments, "-outputPath");
 
                 var exporter = new UnityScanExporter();
@@ -253,7 +214,7 @@ namespace Pencil2Unity.Editor
                 var componentBundlePath = GetArgument(arguments, "-components");
                 var screenBundlePath = GetArgument(arguments, "-screens");
                 var auditBundlePath = GetArgument(arguments, "-audit");
-                var outputPenPath = GetArgument(arguments, "-out");
+                var outputPenPath = GetArgument(arguments, "-out") ?? Path.Combine(ProjectRoot, "Temp", "PencilBundles", "gonghui.pen");
                 var nodeExecutable = GetArgument(arguments, "-nodeExecutable") ?? "node";
 
                 var generator = new UnityPenFileGenerator();
@@ -262,6 +223,7 @@ namespace Pencil2Unity.Editor
                     screenBundlePath,
                     auditBundlePath,
                     outputPenPath,
+                    null,
                     nodeExecutable
                 );
 
@@ -283,14 +245,9 @@ namespace Pencil2Unity.Editor
             try
             {
                 var arguments = Environment.GetCommandLineArgs();
-                var inputRoot = GetArgument(arguments, "-inputRoot") ?? "Assets/UI";
-                var outputPenPath = GetArgument(arguments, "-outputPenPath");
+                var inputRoot = GetArgument(arguments, "-inputRoot") ?? "Assets/Art/UIPanel/gonghui";
+                var outputPenPath = GetArgument(arguments, "-outputPenPath") ?? Path.Combine(ProjectRoot, "Temp", "PencilBundles", "gonghui.pen");
                 var nodeExecutable = GetArgument(arguments, "-nodeExecutable") ?? "node";
-
-                if (string.IsNullOrWhiteSpace(outputPenPath))
-                {
-                    throw new ArgumentException("Missing required argument: -outputPenPath");
-                }
 
                 var result = RunPipeline(inputRoot, outputPenPath, nodeExecutable);
 
@@ -313,11 +270,10 @@ namespace Pencil2Unity.Editor
             EditorApplication.Exit(0);
         }
 
-        private static PipelineResult RunPipeline(string inputRoot, string outputPenPath, string nodeExecutable = "node")
+        internal static PipelineResult RunPipeline(string inputRoot, string outputPenPath, string nodeExecutable = "node")
         {
             var outputRoot = System.IO.Path.GetFullPath(System.IO.Path.Combine(
-                System.IO.Path.GetDirectoryName(outputPenPath) ?? "Temp/DesignSync/output",
-                ".."
+                System.IO.Path.GetDirectoryName(outputPenPath) ?? Path.Combine(ProjectRoot, "Temp", "PencilBundles")
             ));
             var scanPath = System.IO.Path.Combine(outputRoot, "unity-scan", "unity-scan.json");
 
@@ -333,6 +289,7 @@ namespace Pencil2Unity.Editor
                 normalizationResult.ScreenBundlePath,
                 normalizationResult.AuditBundlePath,
                 outputPenPath,
+                resolvedScanPath,
                 nodeExecutable
             );
 
@@ -357,22 +314,16 @@ namespace Pencil2Unity.Editor
             return args[index + 1];
         }
 
-        private static string SelectProjectFolder(string defaultAssetPath, string title)
+        internal static string SelectProjectFolder(string defaultAssetPath, string title)
         {
-            var projectRoot = System.IO.Directory.GetParent(Application.dataPath)?.FullName;
-            if (string.IsNullOrWhiteSpace(projectRoot))
-            {
-                throw new InvalidOperationException("Unable to resolve Unity project root.");
-            }
-
-            var initialFolder = System.IO.Path.Combine(projectRoot, defaultAssetPath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            var initialFolder = System.IO.Path.Combine(ProjectRoot, defaultAssetPath.Replace('/', System.IO.Path.DirectorySeparatorChar));
             var selectedFolder = EditorUtility.OpenFolderPanel(title, initialFolder, string.Empty);
             if (string.IsNullOrWhiteSpace(selectedFolder))
             {
                 return null;
             }
 
-            var normalizedProjectRoot = projectRoot.Replace('\\', '/').TrimEnd('/');
+            var normalizedProjectRoot = ProjectRoot.Replace('\\', '/').TrimEnd('/');
             var normalizedSelectedFolder = selectedFolder.Replace('\\', '/');
             if (!normalizedSelectedFolder.StartsWith(normalizedProjectRoot, StringComparison.OrdinalIgnoreCase))
             {
@@ -383,7 +334,21 @@ namespace Pencil2Unity.Editor
             return string.IsNullOrWhiteSpace(relativePath) ? "Assets" : relativePath;
         }
 
-        private sealed class PipelineResult
+        private static string ProjectRoot
+        {
+            get
+            {
+                var projectRoot = System.IO.Directory.GetParent(Application.dataPath)?.FullName;
+                if (string.IsNullOrWhiteSpace(projectRoot))
+                {
+                    throw new InvalidOperationException("Unable to resolve Unity project root.");
+                }
+
+                return projectRoot;
+            }
+        }
+
+        internal sealed class PipelineResult
         {
             public string ScanPath;
             public string ComponentBundlePath;

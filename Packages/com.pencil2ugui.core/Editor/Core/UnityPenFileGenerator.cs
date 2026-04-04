@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using UnityEngine;
 using UnityEditor.PackageManager;
 
 namespace Design2Ugui.Core
@@ -14,6 +15,7 @@ namespace Design2Ugui.Core
             string screenBundlePath,
             string auditBundlePath,
             string outputPenPath,
+            string scanFilePath = null,
             string nodeExecutable = "node")
         {
             ValidateInput(componentBundlePath, nameof(componentBundlePath));
@@ -26,6 +28,7 @@ namespace Design2Ugui.Core
             }
 
             var packageRoot = ResolvePackageRoot();
+            var projectRoot = ResolveProjectRoot();
             var scriptPath = Path.Combine(packageRoot, "scripts", "write-pen-file.mjs");
             if (!File.Exists(scriptPath))
             {
@@ -40,6 +43,11 @@ namespace Design2Ugui.Core
             arguments.Append(" --screens ").Append(Quote(screenBundlePath));
             arguments.Append(" --audit ").Append(Quote(auditBundlePath));
             arguments.Append(" --out ").Append(Quote(outputPenPath));
+            arguments.Append(" --project-root ").Append(Quote(projectRoot));
+            if (!string.IsNullOrWhiteSpace(scanFilePath) && File.Exists(scanFilePath))
+            {
+                arguments.Append(" --scan ").Append(Quote(scanFilePath));
+            }
 
             var startInfo = new ProcessStartInfo
             {
@@ -105,6 +113,17 @@ namespace Design2Ugui.Core
             }
 
             return packageInfo.resolvedPath;
+        }
+
+        private static string ResolveProjectRoot()
+        {
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (string.IsNullOrWhiteSpace(projectRoot))
+            {
+                throw new InvalidOperationException("Unable to resolve Unity project root.");
+            }
+
+            return projectRoot;
         }
 
         private static string Quote(string value)

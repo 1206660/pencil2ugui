@@ -1,7 +1,12 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function ensureDirectory(filePath) {
+  fs.mkdirSync(filePath, { recursive: true });
 }
 
 function tokenize(value) {
@@ -53,6 +58,87 @@ function buildStroke() {
   };
 }
 
+function createAssetContext(options = {}) {
+  const outputPenPath = options.outputPenPath || '';
+  const outputDirectory = outputPenPath ? path.dirname(path.resolve(outputPenPath)) : '';
+  const imagesDirectory = outputDirectory ? path.join(outputDirectory, 'images') : '';
+
+  if (imagesDirectory) {
+    ensureDirectory(imagesDirectory);
+  }
+
+  return {
+    projectRoot: options.projectRoot ? path.resolve(options.projectRoot) : '',
+    outputDirectory,
+    imagesDirectory,
+    copiedImages: new Map()
+  };
+}
+
+function sanitizeFileStem(value, fallback = 'image') {
+  const stem = String(value ?? fallback)
+    .replace(/[^A-Za-z0-9_-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return stem || fallback;
+}
+
+function resolveUnityAssetPath(assetPath, assetContext) {
+  if (!assetPath || !assetContext.projectRoot) {
+    return '';
+  }
+
+  const normalizedAssetPath = String(assetPath).replace(/[\\/]+/g, path.sep);
+  return path.resolve(assetContext.projectRoot, normalizedAssetPath);
+}
+
+function copyImageAsset(assetPath, node, assetContext) {
+  if (!assetPath || !assetContext.imagesDirectory) {
+    return null;
+  }
+
+  if (assetContext.copiedImages.has(assetPath)) {
+    return assetContext.copiedImages.get(assetPath);
+  }
+
+  const sourcePath = resolveUnityAssetPath(assetPath, assetContext);
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    return null;
+  }
+
+  const extension = path.extname(sourcePath) || '.png';
+  const baseName = sanitizeFileStem(path.basename(sourcePath, extension), sanitizeFileStem(node?.name, 'image'));
+  let fileName = `${baseName}${extension}`;
+  let targetPath = path.join(assetContext.imagesDirectory, fileName);
+  let suffix = 1;
+
+  while (fs.existsSync(targetPath) && !assetContext.copiedImages.has(assetPath)) {
+    fileName = `${baseName}_${suffix}${extension}`;
+    targetPath = path.join(assetContext.imagesDirectory, fileName);
+    suffix += 1;
+  }
+
+  fs.copyFileSync(sourcePath, targetPath);
+  const relativeUrl = `images\\${fileName}`;
+  assetContext.copiedImages.set(assetPath, relativeUrl);
+  return relativeUrl;
+}
+
+function buildImageFill(node, assetContext) {
+  const assetPath = node?.content?.imageRef || node?.style?.spriteRef || '';
+  const relativeUrl = copyImageAsset(assetPath, node, assetContext);
+  if (!relativeUrl) {
+    return null;
+  }
+
+  return {
+    type: 'image',
+    enabled: true,
+    url: relativeUrl,
+    mode: 'fill'
+  };
+}
+
 function buildTextNode(node, x = 0, y = 0) {
   const fontSize = Number.parseFloat(node?.style?.fallbacks?.fontSize ?? '16');
   const color = toColor(node?.style?.fallbacks?.textColor);
@@ -71,8 +157,9 @@ function buildTextNode(node, x = 0, y = 0) {
   };
 }
 
-function buildFrameNode(node, x = 0, y = 0) {
+function buildFrameNode(node, x = 0, y = 0, assetContext) {
   const fillColor = toColor(node?.style?.fallbacks?.fill);
+  const imageFill = buildImageFill(node, assetContext);
   return {
     type: 'frame',
     id: sanitizeId(node?.id ?? node?.name, 'frame'),
@@ -81,7 +168,7 @@ function buildFrameNode(node, x = 0, y = 0) {
     name: toPascalCase(node?.name, 'Frame'),
     width: Math.max(node?.bounds?.width ?? 240, 40),
     height: Math.max(node?.bounds?.height ?? 80, 40),
-    fill: {
+    fill: imageFill ?? {
       type: 'solid',
       enabled: true,
       color: fillColor
@@ -92,37 +179,37 @@ function buildFrameNode(node, x = 0, y = 0) {
   };
 }
 
-function convertTemplateNode(node) {
+function convertTemplateNode(node, assetContext) {
   if (!node) {
-    return buildFrameNode({ name: 'Component', bounds: { width: 240, height: 80 }, style: { fallbacks: {} } });
+    return buildFrameNode({ name: 'Component', bounds: { width: 240, height: 80 }, style: { fallbacks: {} } }, 0, 0, assetContext);
   }
 
   if (node.semanticType === 'Text') {
     return buildTextNode(node);
   }
 
-  const frame = buildFrameNode(node);
+  const frame = buildFrameNode(node, 0, 0, assetContext);
   for (const child of Array.isArray(node.children) ? node.children : []) {
-    frame.children.push(convertChildNode(child));
+    frame.children.push(convertChildNode(child, assetContext));
   }
 
   return frame;
 }
 
-function convertChildNode(node) {
+function convertChildNode(node, assetContext) {
   if (node.semanticType === 'Text') {
     return buildTextNode(node, node?.bounds?.x ?? 0, node?.bounds?.y ?? 0);
   }
 
-  const frame = buildFrameNode(node, node?.bounds?.x ?? 0, node?.bounds?.y ?? 0);
+  const frame = buildFrameNode(node, node?.bounds?.x ?? 0, node?.bounds?.y ?? 0, assetContext);
   for (const child of Array.isArray(node.children) ? node.children : []) {
-    frame.children.push(convertChildNode(child));
+    frame.children.push(convertChildNode(child, assetContext));
   }
   return frame;
 }
 
-function buildComponentDefinition(component, x, y) {
-  const template = convertTemplateNode(component.templateNode);
+function buildComponentDefinition(component, x, y, assetContext) {
+  const template = convertTemplateNode(component.templateNode, assetContext);
   template.id = sanitizeId(component.componentKey, template.id);
   template.name = component.componentName || template.name;
   template.reusable = true;
@@ -131,14 +218,14 @@ function buildComponentDefinition(component, x, y) {
   return template;
 }
 
-function buildComponentPage(components) {
+function buildComponentPage(components, assetContext) {
   const children = [];
   const spacingX = 320;
   const spacingY = 180;
   components.forEach((component, index) => {
     const column = index % 3;
     const row = Math.floor(index / 3);
-    children.push(buildComponentDefinition(component, column * spacingX, row * spacingY));
+    children.push(buildComponentDefinition(component, column * spacingX, row * spacingY, assetContext));
   });
 
   return {
@@ -154,7 +241,7 @@ function buildComponentPage(components) {
   };
 }
 
-function buildPatternPage(components) {
+function buildPatternPage(components, assetContext) {
   const patternComponents = components.filter(component => {
     return component.semanticType === 'Dialog'
       || component.semanticType === 'Table'
@@ -163,7 +250,7 @@ function buildPatternPage(components) {
 
   const children = [];
   patternComponents.forEach((component, index) => {
-    children.push(buildComponentDefinition(component, (index % 2) * 480, Math.floor(index / 2) * 260));
+    children.push(buildComponentDefinition(component, (index % 2) * 480, Math.floor(index / 2) * 260, assetContext));
   });
 
   return {
@@ -281,21 +368,73 @@ function buildAuditPage(reports) {
   };
 }
 
-export function createPenDocumentFromBundles(componentBundlePath, screenBundlePath, auditBundlePath) {
+function buildScreenPageFromNode(screenAsset, x, y, assetContext) {
+  const rootNode = screenAsset?.rootNode;
+  const children = Array.isArray(rootNode?.children)
+    ? rootNode.children.map(child => convertChildNode(child, assetContext))
+    : [];
+
+  return {
+    type: 'frame',
+    id: sanitizeId(screenAsset?.assetKey ?? rootNode?.id, 'screen'),
+    x,
+    y,
+    name: rootNode?.name || screenAsset?.assetPath || 'Screen',
+    width: Math.max(rootNode?.bounds?.width ?? 1440, 1440),
+    height: Math.max(rootNode?.bounds?.height ?? 1024, 1024),
+    clip: true,
+    stroke: buildStroke(),
+    layout: 'none',
+    children
+  };
+}
+
+function buildScreensPageFromScan(scanAssets, assetContext) {
+  const screens = scanAssets.filter(asset => asset?.assetType === 'screen' && asset?.rootNode);
+  const children = [];
+
+  screens.forEach((screenAsset, index) => {
+    const column = index % 2;
+    const row = Math.floor(index / 2);
+    children.push(buildScreenPageFromNode(screenAsset, column * 1600, row * 1160, assetContext));
+  });
+
+  return {
+    type: 'frame',
+    id: 'Screens',
+    x: 0,
+    y: 1200,
+    name: 'Screens',
+    width: 3200,
+    height: Math.max(1200, Math.ceil(Math.max(screens.length, 1) / 2) * 1160 + 80),
+    layout: 'none',
+    children
+  };
+}
+
+export function createPenDocumentFromBundles(componentBundlePath, screenBundlePath, auditBundlePath, options = {}) {
   const componentBundle = readJson(componentBundlePath);
   const screenBundle = readJson(screenBundlePath);
   const auditBundle = readJson(auditBundlePath);
+  const assetContext = createAssetContext(options);
+  const scanDocument = options.scanFilePath && fs.existsSync(options.scanFilePath)
+    ? readJson(options.scanFilePath)
+    : null;
 
   const components = Array.isArray(componentBundle.components) ? componentBundle.components : [];
   const screens = Array.isArray(screenBundle.screens) ? screenBundle.screens : [];
   const reports = Array.isArray(auditBundle.reports) ? auditBundle.reports : [];
+  const scanAssets = Array.isArray(scanDocument?.assets) ? scanDocument.assets : [];
+  const screensPage = scanAssets.length > 0
+    ? buildScreensPageFromScan(scanAssets, assetContext)
+    : buildScreensPage(screens);
 
   return {
     version: '2.10',
     children: [
-      buildComponentPage(components),
-      buildPatternPage(components),
-      buildScreensPage(screens),
+      buildComponentPage(components, assetContext),
+      buildPatternPage(components, assetContext),
+      screensPage,
       buildAuditPage(reports)
     ]
   };

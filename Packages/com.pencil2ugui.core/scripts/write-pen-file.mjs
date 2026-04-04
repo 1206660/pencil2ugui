@@ -9,7 +9,9 @@ function readArgs(argv) {
     components: '',
     screens: '',
     audit: '',
-    out: ''
+    out: '',
+    projectRoot: '',
+    scan: ''
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -37,6 +39,18 @@ function readArgs(argv) {
     if (arg === '--out') {
       result.out = value;
       index += 1;
+      continue;
+    }
+
+    if (arg === '--project-root') {
+      result.projectRoot = value;
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--scan') {
+      result.scan = value;
+      index += 1;
     }
   }
 
@@ -47,11 +61,15 @@ function main() {
   const args = readArgs(process.argv);
   if (!args.components || !args.screens || !args.audit || !args.out) {
     throw new Error(
-      'Usage: node scripts/write-pen-file.mjs --components <components.bundle.json> --screens <screens.bundle.json> --audit <audit-report.json> --out <app-ui.pen>'
+      'Usage: node scripts/write-pen-file.mjs --components <components.bundle.json> --screens <screens.bundle.json> --audit <audit-report.json> --out <app-ui.pen> [--project-root <unity-project-root>]'
     );
   }
 
-  const document = createPenDocumentFromBundles(args.components, args.screens, args.audit);
+  const document = createPenDocumentFromBundles(args.components, args.screens, args.audit, {
+    outputPenPath: args.out,
+    projectRoot: args.projectRoot,
+    scanFilePath: args.scan
+  });
   const json = `${JSON.stringify(document, null, 2)}\n`;
 
   fs.mkdirSync(path.dirname(args.out), { recursive: true });
