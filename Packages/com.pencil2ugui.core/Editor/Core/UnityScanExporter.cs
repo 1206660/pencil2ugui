@@ -86,9 +86,32 @@ namespace Design2Ugui.Core
 
         private DesignSyncAsset BuildPrefabAsset(string prefabPath, IList<DesignSyncIssue> globalIssues)
         {
-            var prefab = PrefabUtility.LoadPrefabContents(prefabPath);
+            GameObject prefab;
+            try
+            {
+                prefab = PrefabUtility.LoadPrefabContents(prefabPath);
+            }
+            catch (Exception exception)
+            {
+                globalIssues.Add(new DesignSyncIssue
+                {
+                    severity = "warning",
+                    code = "prefab-load-failed",
+                    message = $"Failed to load prefab '{prefabPath}': {exception.Message}",
+                    nodeId = BuildAssetKey(prefabPath, DetermineAssetType(prefabPath))
+                });
+                return null;
+            }
+
             if (prefab == null)
             {
+                globalIssues.Add(new DesignSyncIssue
+                {
+                    severity = "warning",
+                    code = "prefab-load-null",
+                    message = $"Prefab '{prefabPath}' could not be loaded and was skipped.",
+                    nodeId = BuildAssetKey(prefabPath, DetermineAssetType(prefabPath))
+                });
                 return null;
             }
 
@@ -111,7 +134,14 @@ namespace Design2Ugui.Core
             }
             finally
             {
-                PrefabUtility.UnloadPrefabContents(prefab);
+                try
+                {
+                    PrefabUtility.UnloadPrefabContents(prefab);
+                }
+                catch
+                {
+                    // Ignore unload failures for broken prefab contents that were partially loaded.
+                }
             }
         }
 

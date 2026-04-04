@@ -10,3 +10,5 @@ Pencil2Unity.sln
 docs
 Assembly-CSharp-Editor.csproj
 Assembly-CSharp.csproj
+Assets/Art
+Assets/Art.meta
