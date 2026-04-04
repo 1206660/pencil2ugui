@@ -10,6 +10,9 @@ namespace Design2Ugui.Models
     {
         public string sourceId;
         public string name;
+        public string semanticType;
+        public string templateKey;
+        public string itemTemplateKey;
         public string prefabKey;
         public UguiComponentType componentType;
         public RectTransformData rectTransform;
@@ -26,6 +29,8 @@ namespace Design2Ugui.Models
         Image,
         Text,
         Button,
+        Toggle,
+        InputField,
         ScrollView,
         HorizontalLayout,
         VerticalLayout,

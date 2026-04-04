@@ -1,15 +1,16 @@
-using UnityEngine;
-using UnityEngine.UI;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+using Design2Ugui.Models;
 using TMPro;
 using UnityEditor;
-using System.Collections.Generic;
-using Design2Ugui.Models;
+using UnityEngine;
+using UnityEngine.UI;
 
 namespace Design2Ugui.Core
 {
     public class UguiConverter
     {
-        private Sprite whiteSprite;
+        private readonly Sprite whiteSprite;
 
         public UguiConverter()
         {
@@ -27,14 +28,17 @@ namespace Design2Ugui.Core
         public GameObject Convert(UguiNode node, Transform parent = null, IDictionary<string, GameObject> prefabMap = null)
         {
             GameObject go;
-            if (node.componentType == UguiComponentType.PrefabInstance && prefabMap != null && !string.IsNullOrEmpty(node.prefabKey) && prefabMap.TryGetValue(node.prefabKey, out var prefab))
+            if (node.componentType == UguiComponentType.PrefabInstance
+                && prefabMap != null
+                && !string.IsNullOrEmpty(node.prefabKey)
+                && prefabMap.TryGetValue(node.prefabKey, out var prefab))
             {
                 go = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-                go.name = node.name;
+                go.name = SanitizeGameObjectName(node.name);
             }
             else
             {
-                go = new GameObject(node.name);
+                go = new GameObject(SanitizeGameObjectName(node.name));
             }
 
             if (parent != null)
@@ -47,8 +51,11 @@ namespace Design2Ugui.Core
             {
                 rectTransform = go.AddComponent<RectTransform>();
             }
+
             ApplyRectTransform(rectTransform, node.rectTransform);
 
+            var childParent = go.transform;
+            var scrollContentParent = default(Transform);
             switch (node.componentType)
             {
                 case UguiComponentType.PrefabInstance:
@@ -74,7 +81,9 @@ namespace Design2Ugui.Core
                     ApplyLayout(go, node.layout);
                     break;
                 case UguiComponentType.ScrollView:
-                    AddScrollView(go);
+                    AddOptionalBackground(go, node.componentData);
+                    scrollContentParent = AddScrollView(go, node.layout);
+                    childParent = scrollContentParent;
                     break;
                 case UguiComponentType.Button:
                     var buttonImage = AddOptionalBackground(go, node.componentData);
@@ -83,6 +92,21 @@ namespace Design2Ugui.Core
                     {
                         button.targetGraphic = buttonImage;
                     }
+
+                    ApplyLayout(go, node.layout);
+                    break;
+                case UguiComponentType.Toggle:
+                    var toggleImage = AddOptionalBackground(go, node.componentData);
+                    var toggle = go.AddComponent<Toggle>();
+                    if (toggleImage != null)
+                    {
+                        toggle.targetGraphic = toggleImage;
+                    }
+
+                    ApplyLayout(go, node.layout);
+                    break;
+                case UguiComponentType.InputField:
+                    AddOptionalBackground(go, node.componentData);
                     ApplyLayout(go, node.layout);
                     break;
                 case UguiComponentType.HorizontalLayout:
@@ -94,8 +118,25 @@ namespace Design2Ugui.Core
 
             foreach (var child in node.children)
             {
-                Convert(child, go.transform, prefabMap);
+                Convert(child, childParent, prefabMap);
             }
+
+            if (node.componentType == UguiComponentType.ScrollView
+                && node.children.Count == 0
+                && scrollContentParent != null
+                && prefabMap != null
+                && !string.IsNullOrEmpty(node.itemTemplateKey)
+                && prefabMap.TryGetValue(node.itemTemplateKey, out var itemPrefab))
+            {
+                var sampleItem = PrefabUtility.InstantiatePrefab(itemPrefab) as GameObject;
+                if (sampleItem != null)
+                {
+                    sampleItem.name = "SampleItem";
+                    sampleItem.transform.SetParent(scrollContentParent, false);
+                }
+            }
+
+            PostProcess(go, node);
 
             return go;
         }
@@ -182,10 +223,12 @@ namespace Design2Ugui.Core
             return TextAnchor.UpperLeft;
         }
 
-        private void AddScrollView(GameObject go)
+        private Transform AddScrollView(GameObject go, LayoutData contentLayout)
         {
             var scrollRect = go.AddComponent<ScrollRect>();
+
             var viewport = new GameObject("Viewport");
+            viewport.name = SanitizeGameObjectName(viewport.name);
             viewport.transform.SetParent(go.transform, false);
             var viewportRect = viewport.AddComponent<RectTransform>();
             viewportRect.anchorMin = Vector2.zero;
@@ -195,14 +238,186 @@ namespace Design2Ugui.Core
             viewport.AddComponent<Mask>().showMaskGraphic = false;
 
             var content = new GameObject("Content");
+            content.name = SanitizeGameObjectName(content.name);
             content.transform.SetParent(viewport.transform, false);
             var contentRect = content.AddComponent<RectTransform>();
             contentRect.anchorMin = new Vector2(0, 1);
             contentRect.anchorMax = new Vector2(1, 1);
             contentRect.pivot = new Vector2(0.5f, 1);
 
+            ApplyLayout(content, contentLayout);
+
             scrollRect.viewport = viewportRect;
             scrollRect.content = contentRect;
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+
+            return content.transform;
+        }
+
+        private void PostProcess(GameObject go, UguiNode node)
+        {
+            if (node.componentType == UguiComponentType.Toggle)
+            {
+                ConfigureToggle(go, node);
+                return;
+            }
+
+            if (node.componentType == UguiComponentType.InputField)
+            {
+                ConfigureInputField(go, node);
+                return;
+            }
+
+            if (node.semanticType == "Dialog")
+            {
+                ConfigureDialog(go);
+            }
+        }
+
+        private void ConfigureToggle(GameObject go, UguiNode node)
+        {
+            var toggle = go.GetComponent<Toggle>();
+            if (toggle == null)
+            {
+                return;
+            }
+
+            var graphics = go.GetComponentsInChildren<Graphic>(true);
+            Graphic candidateGraphic = null;
+            foreach (var graphic in graphics)
+            {
+                if (graphic.gameObject == go)
+                {
+                    continue;
+                }
+
+                var lowerName = graphic.gameObject.name.ToLowerInvariant();
+                if (lowerName.Contains("check") || lowerName.Contains("dot") || lowerName.Contains("icon"))
+                {
+                    candidateGraphic = graphic;
+                    break;
+                }
+
+                candidateGraphic ??= graphic;
+            }
+
+            if (candidateGraphic != null)
+            {
+                toggle.graphic = candidateGraphic;
+                candidateGraphic.gameObject.SetActive(true);
+            }
+
+            if (!string.IsNullOrWhiteSpace(node.name) && node.name.ToLowerInvariant().Contains("radio"))
+            {
+                var parent = go.transform.parent;
+                if (parent != null)
+                {
+                    var group = parent.GetComponent<ToggleGroup>();
+                    if (group == null)
+                    {
+                        group = parent.gameObject.AddComponent<ToggleGroup>();
+                    }
+
+                    toggle.group = group;
+                }
+            }
+        }
+
+        private void ConfigureInputField(GameObject go, UguiNode node)
+        {
+            var inputField = go.GetComponent<TMP_InputField>();
+            if (inputField == null)
+            {
+                inputField = go.AddComponent<TMP_InputField>();
+            }
+
+            var texts = go.GetComponentsInChildren<TextMeshProUGUI>(true);
+            TextMeshProUGUI placeholder = null;
+            TextMeshProUGUI textComponent = null;
+            foreach (var text in texts)
+            {
+                if (text.gameObject == go)
+                {
+                    continue;
+                }
+
+                var lowerName = text.gameObject.name.ToLowerInvariant();
+                var looksLikePlaceholder = lowerName.Contains("placeholder")
+                    || lowerName.Contains("value")
+                    || text.color.a > 0f && text.color.grayscale > 0.35f && text.color.grayscale < 0.8f;
+
+                if (looksLikePlaceholder && placeholder == null)
+                {
+                    placeholder = text;
+                    continue;
+                }
+
+                textComponent ??= text;
+            }
+
+            if (textComponent == null && placeholder != null)
+            {
+                textComponent = CreateInputTextChild(go.transform, placeholder);
+            }
+
+            if (textComponent == null)
+            {
+                textComponent = CreateInputTextChild(go.transform, null);
+            }
+
+            inputField.textComponent = textComponent;
+            if (placeholder != null)
+            {
+                inputField.placeholder = placeholder;
+                if (string.IsNullOrEmpty(inputField.text))
+                {
+                    inputField.text = string.Empty;
+                }
+            }
+
+            if (node.name != null && node.name.ToLowerInvariant().Contains("textarea"))
+            {
+                inputField.lineType = TMP_InputField.LineType.MultiLineNewline;
+            }
+        }
+
+        private TextMeshProUGUI CreateInputTextChild(Transform parent, TextMeshProUGUI source)
+        {
+            var textGo = new GameObject("InputText");
+            textGo.transform.SetParent(parent, false);
+            var rect = textGo.AddComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            var text = textGo.AddComponent<TextMeshProUGUI>();
+            text.text = string.Empty;
+            text.fontSize = source != null ? source.fontSize : 14f;
+            text.color = source != null ? source.color : Color.black;
+            text.alignment = source != null ? source.alignment : TextAlignmentOptions.Left;
+            return text;
+        }
+
+        private void ConfigureDialog(GameObject go)
+        {
+            if (go.GetComponent<CanvasGroup>() == null)
+            {
+                go.AddComponent<CanvasGroup>();
+            }
+        }
+
+        private string SanitizeGameObjectName(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return "Node";
+            }
+
+            var normalized = Regex.Replace(raw, @"[^\p{L}\p{N}_]+", "_");
+            normalized = Regex.Replace(normalized, @"_+", "_").Trim('_');
+            return string.IsNullOrWhiteSpace(normalized) ? "Node" : normalized;
         }
     }
 }
