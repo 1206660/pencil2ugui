@@ -148,6 +148,11 @@ function toPascalCase(value, fallback = 'Node') {
     .join('');
 }
 
+function buildPrefixedName(prefix, rawLabel, fallback) {
+  const label = toPascalCase(rawLabel, fallback);
+  return label.startsWith(prefix) ? label : `${prefix}${label}`;
+}
+
 function stableStringify(value) {
   if (Array.isArray(value)) {
     return `[${value.map(stableStringify).join(',')}]`;
@@ -513,6 +518,35 @@ function determineSemanticTypeForRef(referenceNode, instanceNode) {
   return determineSemanticType(referenceNode);
 }
 
+function refineSemanticTypeForContext(node, semanticType, parentSemanticType = null) {
+  const name = `${node.name ?? ''} ${node.context ?? ''}`.toLowerCase();
+  if (parentSemanticType === 'Dialog') {
+    if (/(header|title|subtitle|description|icon)/.test(name)) {
+      return 'DialogHeader';
+    }
+
+    if (/(action|footer)/.test(name)) {
+      return 'DialogActions';
+    }
+
+    if (/(body|content)/.test(name)) {
+      return 'DialogBody';
+    }
+  }
+
+  if (parentSemanticType === 'InputField') {
+    if (/(label text|label)/.test(name)) {
+      return 'InputLabel';
+    }
+
+    if (/(input value|placeholder|input|textarea)/.test(name)) {
+      return 'InputValue';
+    }
+  }
+
+  return semanticType;
+}
+
 function determineComponentType(node, semanticType = determineSemanticType(node)) {
   if (node.type === 'text' || node.type === 'icon_font') {
     return 'Text';
@@ -523,6 +557,10 @@ function determineComponentType(node, semanticType = determineSemanticType(node)
   }
 
   if (semanticType === 'Dialog') {
+    return 'Panel';
+  }
+
+  if (semanticType === 'DialogHeader' || semanticType === 'DialogBody' || semanticType === 'DialogActions') {
     return 'Panel';
   }
 
@@ -578,33 +616,43 @@ function buildNodeName(node, semanticType, componentType) {
     case 'IconButton':
       return lowerBase.includes('button') ? toPascalCase(baseLabel, 'IconButton') : `IconButton${toPascalCase(label, 'Action')}`;
     case 'ScrollView':
-      return `ScrollView${toPascalCase(baseLabel, 'List')}`;
+      return buildPrefixedName('ScrollView', baseLabel, 'List');
     case 'Dialog':
-      return `Dialog${toPascalCase(baseLabel, 'Panel')}`;
+      return buildPrefixedName('Dialog', baseLabel, 'Panel');
+    case 'DialogHeader':
+      return buildPrefixedName('DialogHeader', baseLabel, 'Section');
+    case 'DialogBody':
+      return buildPrefixedName('DialogBody', baseLabel, 'Content');
+    case 'DialogActions':
+      return buildPrefixedName('DialogActions', baseLabel, 'Actions');
     case 'Toggle':
-      return toPascalCase(baseLabel, 'Toggle');
+      return buildPrefixedName('Toggle', baseLabel, 'Toggle');
     case 'InputField':
-      return toPascalCase(baseLabel, 'InputField');
+      return buildPrefixedName('InputField', baseLabel, 'Field');
+    case 'InputLabel':
+      return buildPrefixedName('InputLabel', baseLabel, 'Label');
+    case 'InputValue':
+      return buildPrefixedName('InputValue', baseLabel, 'Value');
     case 'Card':
-      return `Card${toPascalCase(baseLabel, 'Item')}`;
+      return buildPrefixedName('Card', baseLabel, 'Item');
     case 'ListItem':
-      return `Item${toPascalCase(baseLabel, 'Row')}`;
+      return buildPrefixedName('Item', baseLabel, 'Row');
     case 'Table':
-      return lowerBase.includes('table') ? toPascalCase(baseLabel, 'Table') : `Table${toPascalCase(baseLabel, 'Data')}`;
+      return buildPrefixedName('Table', baseLabel, 'Data');
     case 'TableHeader':
-      return lowerBase.includes('header') ? toPascalCase(baseLabel, 'Header') : `TableHeader${toPascalCase(baseLabel, 'Section')}`;
+      return buildPrefixedName('TableHeader', baseLabel, 'Section');
     case 'TableFooter':
-      return lowerBase.includes('footer') ? toPascalCase(baseLabel, 'Footer') : `TableFooter${toPascalCase(baseLabel, 'Section')}`;
+      return buildPrefixedName('TableFooter', baseLabel, 'Section');
     case 'TableRow':
-      return lowerBase.includes('row') ? toPascalCase(baseLabel, 'Row') : `TableRow${toPascalCase(baseLabel, 'Item')}`;
+      return buildPrefixedName('TableRow', baseLabel, 'Item');
     case 'TableCell':
-      return lowerBase.includes('cell') ? toPascalCase(baseLabel, 'Cell') : `TableCell${toPascalCase(baseLabel, 'Item')}`;
+      return buildPrefixedName('TableCell', baseLabel, 'Item');
     case 'TableColumnHeader':
-      return lowerBase.includes('column') ? toPascalCase(baseLabel, 'ColumnHeader') : `TableColumnHeader${toPascalCase(baseLabel, 'Item')}`;
+      return buildPrefixedName('TableColumnHeader', baseLabel, 'Item');
     case 'Text':
-      return `Text${toPascalCase(label, 'Label')}`;
+      return buildPrefixedName('Text', label, 'Label');
     case 'Image':
-      return `Image${toPascalCase(baseLabel, 'Graphic')}`;
+      return buildPrefixedName('Image', baseLabel, 'Graphic');
     default:
       break;
   }
@@ -850,7 +898,7 @@ function resolveItemTemplateKey(node, context) {
 
 function convertResolvedNodeToUgui(node, index, variables = null, parentNode = null) {
   const materialized = materializeNode(node, index);
-  const semanticType = determineSemanticType(materialized);
+  const semanticType = refineSemanticTypeForContext(materialized, determineSemanticType(materialized), parentNode ? determineSemanticType(parentNode) : null);
   const componentType = determineComponentType(materialized, semanticType);
   const uguiNode = {
     sourceId: materialized.id ?? '',
@@ -885,7 +933,11 @@ function convertNodeToBundleNode(node, context, parentNode = null) {
 
     const componentKey = collectComponent(referenced, context);
     const materialized = materializeNode(node, context.index);
-    const semanticType = determineSemanticTypeForRef(referenced, materialized);
+    const semanticType = refineSemanticTypeForContext(
+      materialized,
+      determineSemanticTypeForRef(referenced, materialized),
+      parentNode ? determineSemanticType(parentNode) : null
+    );
     const componentType = determineComponentType(referenced, semanticType);
     return {
       sourceId: materialized.id ?? '',
@@ -902,7 +954,11 @@ function convertNodeToBundleNode(node, context, parentNode = null) {
   }
 
   const materialized = materializeNode(node, context.index);
-  const semanticType = determineSemanticType(materialized);
+  const semanticType = refineSemanticTypeForContext(
+    materialized,
+    determineSemanticType(materialized),
+    parentNode ? determineSemanticType(parentNode) : null
+  );
   const componentType = determineComponentType(materialized, semanticType);
   const signature = stableStringify(normalizeComponentNodeForSignature(materialized));
   const parentSemanticType = parentNode ? determineSemanticType(parentNode) : null;

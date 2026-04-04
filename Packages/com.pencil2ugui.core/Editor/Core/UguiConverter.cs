@@ -27,6 +27,15 @@ namespace Design2Ugui.Core
 
         public GameObject Convert(UguiNode node, Transform parent = null, IDictionary<string, GameObject> prefabMap = null)
         {
+            if (node.componentType == UguiComponentType.PrefabInstance
+                && node.semanticType == "Dialog"
+                && prefabMap != null
+                && !string.IsNullOrEmpty(node.prefabKey)
+                && prefabMap.TryGetValue(node.prefabKey, out var dialogPrefab))
+            {
+                return CreateDialogShell(node, parent, dialogPrefab);
+            }
+
             GameObject go;
             if (node.componentType == UguiComponentType.PrefabInstance
                 && prefabMap != null
@@ -139,6 +148,57 @@ namespace Design2Ugui.Core
             PostProcess(go, node);
 
             return go;
+        }
+
+        private GameObject CreateDialogShell(UguiNode node, Transform parent, GameObject dialogPrefab)
+        {
+            var root = new GameObject(SanitizeGameObjectName(node.name));
+            if (parent != null)
+            {
+                root.transform.SetParent(parent, false);
+            }
+
+            var rootRect = root.AddComponent<RectTransform>();
+            ApplyRectTransform(rootRect, node.rectTransform);
+            ConfigureDialog(root);
+
+            var backdrop = new GameObject("Backdrop");
+            backdrop.transform.SetParent(root.transform, false);
+            var backdropRect = backdrop.AddComponent<RectTransform>();
+            backdropRect.anchorMin = Vector2.zero;
+            backdropRect.anchorMax = Vector2.one;
+            backdropRect.offsetMin = Vector2.zero;
+            backdropRect.offsetMax = Vector2.zero;
+            var backdropImage = backdrop.AddComponent<Image>();
+            backdropImage.sprite = whiteSprite;
+            backdropImage.color = new Color(0f, 0f, 0f, 0.45f);
+            backdrop.AddComponent<Button>().targetGraphic = backdropImage;
+
+            var panel = new GameObject("Panel");
+            panel.transform.SetParent(root.transform, false);
+            var panelRect = panel.AddComponent<RectTransform>();
+            panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+            panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+            panelRect.pivot = new Vector2(0.5f, 0.5f);
+            panelRect.anchoredPosition = Vector2.zero;
+            panelRect.sizeDelta = node.rectTransform.sizeDelta;
+
+            var instance = PrefabUtility.InstantiatePrefab(dialogPrefab) as GameObject;
+            if (instance != null)
+            {
+                instance.name = "Content";
+                instance.transform.SetParent(panel.transform, false);
+                var instanceRect = instance.GetComponent<RectTransform>();
+                if (instanceRect != null)
+                {
+                    instanceRect.anchorMin = new Vector2(0.5f, 0.5f);
+                    instanceRect.anchorMax = new Vector2(0.5f, 0.5f);
+                    instanceRect.pivot = new Vector2(0.5f, 0.5f);
+                    instanceRect.anchoredPosition = Vector2.zero;
+                }
+            }
+
+            return root;
         }
 
         private void ApplyRectTransform(RectTransform rt, RectTransformData data)
