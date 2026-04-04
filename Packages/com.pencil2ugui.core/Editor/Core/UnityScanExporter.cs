@@ -12,6 +12,8 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using UguiInputField = UnityEngine.UI.InputField;
+using UguiText = UnityEngine.UI.Text;
 
 namespace Design2Ugui.Core
 {
@@ -332,6 +334,11 @@ namespace Design2Ugui.Core
                 return "InputField";
             }
 
+            if (gameObject.GetComponent<UguiInputField>() != null)
+            {
+                return "InputField";
+            }
+
             if (gameObject.GetComponent<Toggle>() != null)
             {
                 return "Toggle";
@@ -363,6 +370,11 @@ namespace Design2Ugui.Core
             }
 
             if (gameObject.GetComponent<TMP_Text>() != null)
+            {
+                return "Text";
+            }
+
+            if (gameObject.GetComponent<UguiText>() != null)
             {
                 return "Text";
             }
@@ -586,6 +598,14 @@ namespace Design2Ugui.Core
                 style.fallbacks["fontSize"] = text.fontSize.ToString(CultureInfo.InvariantCulture);
                 RegisterDependency(context, "material", text.fontMaterial);
             }
+            else if (gameObject.TryGetComponent<UguiText>(out var uguiText))
+            {
+                style.fontRef = RegisterDependency(context, "font", uguiText.font);
+                style.fallbacks["textColor"] = ColorUtility.ToHtmlStringRGBA(uguiText.color);
+                style.fallbacks["fontSize"] = uguiText.fontSize.ToString(CultureInfo.InvariantCulture);
+                style.fallbacks["fontStyle"] = uguiText.fontStyle.ToString();
+                RegisterDependency(context, "material", uguiText.material);
+            }
 
             return style;
         }
@@ -599,12 +619,23 @@ namespace Design2Ugui.Core
                 content.text = text.text ?? string.Empty;
                 content.value = text.text ?? string.Empty;
             }
+            else if (gameObject.TryGetComponent<UguiText>(out var uguiText))
+            {
+                content.text = uguiText.text ?? string.Empty;
+                content.value = uguiText.text ?? string.Empty;
+            }
 
             if (gameObject.TryGetComponent<TMP_InputField>(out var inputField))
             {
                 content.placeholder = (inputField.placeholder as TMP_Text)?.text ?? string.Empty;
                 content.value = inputField.text ?? string.Empty;
                 RegisterDependency(context, "font", inputField.textComponent?.font);
+            }
+            else if (gameObject.TryGetComponent<UguiInputField>(out var uguiInputField))
+            {
+                content.placeholder = (uguiInputField.placeholder as UguiText)?.text ?? string.Empty;
+                content.value = uguiInputField.text ?? string.Empty;
+                RegisterDependency(context, "font", uguiInputField.textComponent?.font);
             }
 
             if (gameObject.TryGetComponent<Image>(out var image))

@@ -38,6 +38,17 @@ function sanitizeId(value, fallback = 'node') {
   return raw || fallback;
 }
 
+function makeUniqueId(value, assetContext, fallback = 'node') {
+  const baseId = sanitizeId(value, fallback);
+  if (!assetContext?.nodeIds) {
+    return baseId;
+  }
+
+  const currentCount = assetContext.nodeIds.get(baseId) || 0;
+  assetContext.nodeIds.set(baseId, currentCount + 1);
+  return currentCount === 0 ? baseId : `${baseId}_${currentCount}`;
+}
+
 function toColor(fill) {
   if (typeof fill !== 'string') {
     return '#FFFFFF';
@@ -71,7 +82,8 @@ function createAssetContext(options = {}) {
     projectRoot: options.projectRoot ? path.resolve(options.projectRoot) : '',
     outputDirectory,
     imagesDirectory,
-    copiedImages: new Map()
+    copiedImages: new Map(),
+    nodeIds: new Map()
   };
 }
 
@@ -139,30 +151,41 @@ function buildImageFill(node, assetContext) {
   };
 }
 
-function buildTextNode(node, x = 0, y = 0) {
+function isTextLikeNode(node) {
+  return node?.semanticType === 'Text'
+    || node?.componentType === 'Text'
+    || Boolean(node?.content?.text)
+    || Boolean(node?.content?.value);
+}
+
+function buildTextNode(node, x = 0, y = 0, assetContext) {
   const fontSize = Number.parseFloat(node?.style?.fallbacks?.fontSize ?? '16');
   const color = toColor(node?.style?.fallbacks?.textColor);
   return {
     type: 'text',
-    id: sanitizeId(node?.id ?? node?.name, 'text'),
+    id: makeUniqueId(node?.id ?? node?.name, assetContext, 'text'),
     x,
     y,
     name: toPascalCase(node?.name, 'Text'),
     width: Math.max(node?.bounds?.width ?? 160, 80),
     height: Math.max(node?.bounds?.height ?? fontSize + 8, 24),
     content: node?.content?.text || node?.content?.value || node?.name || 'Text',
+    fill: `${color.toLowerCase()}ff`,
+    textGrowth: 'fixed-width',
+    fontFamily: 'Inter',
     fontSize: Number.isFinite(fontSize) ? fontSize : 16,
-    fills: [{ color }],
-    layout: 'none'
+    fontWeight: 'normal'
   };
 }
 
 function buildFrameNode(node, x = 0, y = 0, assetContext) {
+  const hasSolidFill = typeof node?.style?.fallbacks?.fill === 'string' && node.style.fallbacks.fill.trim() !== '';
   const fillColor = toColor(node?.style?.fallbacks?.fill);
   const imageFill = buildImageFill(node, assetContext);
+  const isPlainContainer = !imageFill && node?.componentType === 'Panel';
   return {
     type: 'frame',
-    id: sanitizeId(node?.id ?? node?.name, 'frame'),
+    id: makeUniqueId(node?.id ?? node?.name, assetContext, 'frame'),
     x,
     y,
     name: toPascalCase(node?.name, 'Frame'),
@@ -170,7 +193,7 @@ function buildFrameNode(node, x = 0, y = 0, assetContext) {
     height: Math.max(node?.bounds?.height ?? 80, 40),
     fill: imageFill ?? {
       type: 'solid',
-      enabled: true,
+      enabled: !isPlainContainer && hasSolidFill,
       color: fillColor
     },
     stroke: buildStroke(),
@@ -184,8 +207,8 @@ function convertTemplateNode(node, assetContext) {
     return buildFrameNode({ name: 'Component', bounds: { width: 240, height: 80 }, style: { fallbacks: {} } }, 0, 0, assetContext);
   }
 
-  if (node.semanticType === 'Text') {
-    return buildTextNode(node);
+  if (isTextLikeNode(node)) {
+    return buildTextNode(node, 0, 0, assetContext);
   }
 
   const frame = buildFrameNode(node, 0, 0, assetContext);
@@ -197,8 +220,8 @@ function convertTemplateNode(node, assetContext) {
 }
 
 function convertChildNode(node, assetContext) {
-  if (node.semanticType === 'Text') {
-    return buildTextNode(node, node?.bounds?.x ?? 0, node?.bounds?.y ?? 0);
+  if (isTextLikeNode(node)) {
+    return buildTextNode(node, node?.bounds?.x ?? 0, node?.bounds?.y ?? 0, assetContext);
   }
 
   const frame = buildFrameNode(node, node?.bounds?.x ?? 0, node?.bounds?.y ?? 0, assetContext);
@@ -210,7 +233,7 @@ function convertChildNode(node, assetContext) {
 
 function buildComponentDefinition(component, x, y, assetContext) {
   const template = convertTemplateNode(component.templateNode, assetContext);
-  template.id = sanitizeId(component.componentKey, template.id);
+  template.id = makeUniqueId(component.componentKey, assetContext, template.id);
   template.name = component.componentName || template.name;
   template.reusable = true;
   template.x = x;
@@ -267,6 +290,7 @@ function buildPatternPage(components, assetContext) {
 }
 
 function buildScreenInstance(instance, index) {
+  const assetContext = arguments[2];
   const width = Math.max(instance?.bounds?.width ?? 240, 80);
   const height = Math.max(instance?.bounds?.height ?? 80, 40);
   const x = instance?.bounds?.x ?? 0;
@@ -275,7 +299,7 @@ function buildScreenInstance(instance, index) {
   if (instance?.componentRef) {
     return {
       type: 'ref',
-      id: sanitizeId(instance.instanceKey, `instance_${index}`),
+      id: makeUniqueId(instance.instanceKey, assetContext, `instance_${index}`),
       ref: sanitizeId(instance.componentRef, 'component'),
       x,
       y,
@@ -287,7 +311,7 @@ function buildScreenInstance(instance, index) {
 
   return {
     type: 'frame',
-    id: sanitizeId(instance.instanceKey, `instance_${index}`),
+    id: makeUniqueId(instance.instanceKey, assetContext, `instance_${index}`),
     x,
     y,
     name: toPascalCase(instance.name, 'Frame'),
@@ -304,14 +328,15 @@ function buildScreenInstance(instance, index) {
 }
 
 function buildScreenPage(screen, x, y) {
+  const assetContext = arguments[3];
   const children = [];
   screen.componentInstances.forEach((instance, index) => {
-    children.push(buildScreenInstance(instance, index));
+    children.push(buildScreenInstance(instance, index, assetContext));
   });
 
   return {
     type: 'frame',
-    id: sanitizeId(screen.screenKey, 'screen'),
+    id: makeUniqueId(screen.screenKey, assetContext, 'screen'),
     x,
     y,
     name: screen.rootFrameName || screen.screenName || 'Screen',
@@ -325,11 +350,12 @@ function buildScreenPage(screen, x, y) {
 }
 
 function buildScreensPage(screens) {
+  const assetContext = arguments[1];
   const children = [];
   screens.forEach((screen, index) => {
     const column = index % 2;
     const row = Math.floor(index / 2);
-    children.push(buildScreenPage(screen, column * 1600, row * 1160));
+    children.push(buildScreenPage(screen, column * 1600, row * 1160, assetContext));
   });
 
   return {
@@ -353,7 +379,7 @@ function buildAuditPage(reports) {
     content: { text: `[${issue.severity}] ${issue.code}: ${issue.message}` },
     style: { fallbacks: { fontSize: '14', textColor: issue.severity === 'error' ? '#DC2626' : '#D97706' } },
     bounds: { width: 1200, height: 24 }
-  }, 0, index * 28));
+  }, 0, index * 28, null));
 
   return {
     type: 'frame',
@@ -376,7 +402,7 @@ function buildScreenPageFromNode(screenAsset, x, y, assetContext) {
 
   return {
     type: 'frame',
-    id: sanitizeId(screenAsset?.assetKey ?? rootNode?.id, 'screen'),
+    id: makeUniqueId(screenAsset?.assetKey ?? rootNode?.id, assetContext, 'screen'),
     x,
     y,
     name: rootNode?.name || screenAsset?.assetPath || 'Screen',
